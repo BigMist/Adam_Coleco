@@ -773,6 +773,10 @@ module cv_adamnet
   end
 
   assign watch_key = (kbd_state == KBD_KEY) && (disk_state == DISK_IDLE);
+  
+  assign input_strobe = old_keystb ^ ps2_key[10];
+  reg old_keystb = 0;
+  always @(posedge clk_i) old_keystb <= ps2_key[10];
 
   always_ff @(posedge clk_i) begin
     ramb_addr        <= watch_key && input_strobe & ~clear_strobe ? kbd_buffer : int_ramb_addr[0];
@@ -932,24 +936,21 @@ module cv_adamnet
       else if (ps2_key[8:0] == 9'h058) begin if (ps2_key[9]) caps_lock<=~caps_lock; end  //CAPSLOCK
       else if (ps2_key[8:0] == 9'h059) shift <= ps2_key[9]; //RIGHT SHIFT
 		else if (ps2_key[8:0] == 9'h007) osd <= ps2_key[9]; //OSD ignore key
-		
+		else if (ps2_key[8:0] == 9'h000) osd <= ps2_key[9];
       else begin
         press_btn    <= ps2_key[9];
         code         <= ps2_key[7:0];
-        input_strobe <= '1;
-        key_rep_timer <= 'd7000000;
-      end
-    end else if (clear_strobe) begin
-        input_strobe <= '0;
-    end else begin
-        key_rep_timer <= key_rep_timer-1;
-        if (key_rep_timer==0)
-        begin
-           key_rep_timer <= 933333;
-           input_strobe<= ps2_key[10];
-        end
+		end
+//        input_strobe <= '1;
+//        key_rep_timer <= 'd7000000;
+//    end else begin
+//        key_rep_timer <= key_rep_timer-1;
+//        if (key_rep_timer==0)
+//        begin
+//           key_rep_timer <= 933333;
+//        end
+//    end
     end
-
     clear_strobe <= '0;
 
     case (kbd_state)

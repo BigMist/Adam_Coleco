@@ -70,6 +70,10 @@ module cv_console
   (
    // Global Interface -------------------------------------------------------
    input                        clk_i,
+	input                        clk_100_i,
+	input                        clk_25_i,
+	input                        sprite_max_i,
+	input                        scan_lines_i,
    input                        clk_en_10m7_i,
    input                        reset_n_i,
 	input                        mode,
@@ -126,10 +130,10 @@ module cv_console
    input                        ramb_rd_ack,
 
    // Video RAM Interface ----------------------------------------------------
-   output [13:0]                vram_a_o,
-   output                       vram_we_o,
-   output [7:0]                 vram_d_o,
-   input [7:0]                  vram_d_i,
+//   output [13:0]                vram_a_o,
+//   output                       vram_we_o,
+//   output [7:0]                 vram_d_o,
+//   input [7:0]                  vram_d_i,
    // Cartridge ROM Interface ------------------------------------------------
    output [19:0]                cart_a_o,
    input [7:0]                  cart_d_i,
@@ -151,6 +155,7 @@ module cv_console
    output                       hblank_o,
    output                       vblank_o,
    output                       comp_sync_n_o,
+	output                       ce_pix_o,
    // Audio Interface --------------------------------------------------------
    output [13:0]                audio_o,
 
@@ -202,6 +207,9 @@ module cv_console
   // VDP18 signal
   logic [7:0]    d_from_vdp_s;
   logic          vdp_int_n_s;
+  logic [3:0]    red_s;
+  logic [3:0]    grn_s;
+  logic [3:0]    blu_s;
 
   // SN76489 signal
   logic           psg_ready_s;
@@ -374,33 +382,77 @@ module cv_console
   // TMS9928A Video Display Processor
   //---------------------------------------------------------------------------
 
-  vdp18_core #(.is_pal_g(is_pal_g), .compat_rgb_g(compat_rgb_g)) vdp18_b(
-                                                                         .clk_i(clk_i),
-                                                                         .clk_en_10m7_i(clk_en_10m7_i),
-                                                                         .reset_n_i(reset_n_s),
-                                                                         .csr_n_i(vdp_r_n_s),
-                                                                         .csw_n_i(vdp_w_n_s),
-                                                                         .mode_i(a_s[0]),
-                                                                         .int_n_o(vdp_int_n_s),
-                                                                         .cd_i(d_from_cpu_s),
-                                                                         .cd_o(d_from_vdp_s),
-                                                                         .vram_we_o(vram_we_o),
-                                                                         .vram_a_o(vram_a_o),
-                                                                         .vram_d_o(vram_d_o),
-                                                                         .vram_d_i(vram_d_i),
-                                                                         .col_o(col_o),
-                                                                         .rgb_r_o(rgb_r_o),
-                                                                         .rgb_g_o(rgb_g_o),
-                                                                         .rgb_b_o(rgb_b_o),
-                                                                         .hsync_n_o(hsync_n_o),
-                                                                         .vsync_n_o(vsync_n_o),
-                                                                         .blank_n_o(blank_n_o),
-                                                                         .border_i(border_i),
-                                                                         .hblank_o(hblank_o),
-                                                                         .vblank_o(vblank_o),
-                                                                         .comp_sync_n_o(comp_sync_n_o)
-                                                                         );
+//  vdp18_core #(.is_pal_g(is_pal_g), .compat_rgb_g(compat_rgb_g)) vdp18_b(
+//                                                                         .clk_i(clk_i),
+//                                                                         .clk_en_10m7_i(clk_en_10m7_i),
+//                                                                         .reset_n_i(reset_n_s),
+//                                                                         .csr_n_i(vdp_r_n_s),
+//                                                                         .csw_n_i(vdp_w_n_s),
+//                                                                         .mode_i(a_s[0]),
+//                                                                         .int_n_o(vdp_int_n_s),
+//                                                                         .cd_i(d_from_cpu_s),
+//                                                                         .cd_o(d_from_vdp_s),
+//                                                                         .vram_we_o(vram_we_o),
+//                                                                         .vram_a_o(vram_a_o),
+//                                                                         .vram_d_o(vram_d_o),
+//                                                                         .vram_d_i(vram_d_i),
+//                                                                         .col_o(col_o),
+//                                                                         .rgb_r_o(rgb_r_o),
+//                                                                         .rgb_g_o(rgb_g_o),
+//                                                                         .rgb_b_o(rgb_b_o),
+//                                                                         .hsync_n_o(hsync_n_o),
+//                                                                         .vsync_n_o(vsync_n_o),
+//                                                                         .blank_n_o(blank_n_o),
+//                                                                         .border_i(border_i),
+//                                                                         .hblank_o(hblank_o),
+//                                                                         .vblank_o(vblank_o),
+//                                                                         .comp_sync_n_o(comp_sync_n_o)
+//                                                                         );
+//																								 
+																								 
+																								 
+   // F18A VDP
+   //
+   // The soft button reset is sent to the F18A (unlike the real CV) to ensure
+   // a game will not leave enhanced F18A settings enabled which will cause
+   // problems for legacy or non-F18A games.
+   //
+   f18a_core vdp_18b
+   ( 
+	 .clk_100m0_i    (clk_100_i),  // must be 100MHz
+    .clk_25m0_i     (clk_25_i),   // must be an actual 25MHz clock, NOT an enable
+   // 9918A to Host interface
+    .reset_n_i      (reset_n_s),    // active low, the F18A gets soft reset
+    .mode_i         (a_s[0]),
+    .csw_n_i        (vdp_w_n_s),
+    .csr_n_i        (vdp_r_n_s),
+    .int_n_o        (vdp_int_n_s),
+    .cd_i           (d_from_cpu_s),
+    .cd_o           (d_from_vdp_s),
+   // Video Output
+    .blank_o        (blank_n_o),    // active high during active video
+    .hsync_o        (hsync_n_o),
+    .vsync_o        (vsync_n_o),
+	 .vblank_o       (vblank_o),
+	 .hblank_o       (hblank_o),
+	 .ce_pix         (ce_pix_o),
+    .red_o          (red_s),        // 4-bit red
+    .grn_o          (grn_s),        // 4-bit green
+    .blu_o          (blu_s),        // 4-bit blue
+   // Feature Selection
+    .sprite_max_i   (sprite_max_i), // default sprite max, '0'=32, '1'=4
+    .scanlines_i    (scan_lines_i), // simulated scan lines, '0'=no, '1'=yes
+   // SPI for GPU access, not enabled in the Phoenix
+    .spi_clk_o      (),
+    .spi_cs_o       (),
+    .spi_mosi_o     (),
+    .spi_miso_i     (1'b0)
+   );
 
+	assign rgb_r_o = {red_s,4'b0};
+	assign rgb_g_o = {grn_s,4'b0};
+	assign rgb_b_o = {blu_s,4'b0};
+	
   //---------------------------------------------------------------------------
   // SN76489 Programmable Sound Generator
   //---------------------------------------------------------------------------
@@ -408,7 +460,7 @@ module cv_console
 
  sn76489_audio #(.FAST_IO_G(1'b0),.MIN_PERIOD_CNT_G(17)) psg_a(
                                           .clk_i(clk_i),
-                                          .en_clk_psg_i(clk_en_3m58_n_s),
+                                          .en_clk_psg_i(clk_en_3m58_p_s),
                                           .ce_n_i(psg_we_n_s),
                                           .wr_n_i(psg_we_n_s),
                                           .ready_o(psg_ready_s),

@@ -13,16 +13,7 @@ set_global_assignment -name VHDL_FILE rtl/ym2149_audio.vhd
 set_global_assignment -name VERILOG_FILE rtl/rom.v
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/spram.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/dpramv.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/vdp18v/vdp18_pkg.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/vdp18v/vdp18_pattern.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/vdp18v/vdp18_sprite.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/vdp18v/vdp18_clk_gen.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/vdp18v/vdp18_col_mux.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/vdp18v/vdp18_cpuio.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/vdp18v/vdp18_ctrl.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/vdp18v/vdp18_hor_vert.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/vdp18v/vdp18_addr_mux.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/vdp18v/vdp18_core.sv
+set_global_assignment -name QIP_FILE rtl/F18A/f18a.qip
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/cv_addr_dec.sv
 #set_global_assignment -name SYSTEMVERILOG_FILE rtl/cv_ctrl.sv
 set_global_assignment -name VHDL_FILE rtl/cv_ctrl.vhd

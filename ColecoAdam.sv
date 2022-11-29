@@ -189,7 +189,7 @@ assign {DDRAM_CLK, DDRAM_BURSTCNT, DDRAM_ADDR, DDRAM_DIN, DDRAM_BE, DDRAM_RD, DD
 assign LED_USER   = ioctl_download;
 assign LED_DISK   = 0;
 assign LED_POWER  = 0;
-assign BUTTONS    = 0;
+//assign BUTTONS    = 0;
 assign VGA_SCALER = 0;
 assign HDMI_FREEZE= 0;
 
@@ -204,7 +204,7 @@ video_freak video_freak
         .VGA_DE_IN(vga_de),
         .ARX((!ar) ? 12'd4 : (ar - 1'd1)),
         .ARY((!ar) ? 12'd3 : 12'd0),
-        .CROP_SIZE(en216p ? 10'd216 : 10'd0),
+        .CROP_SIZE(0),
         .CROP_OFF(0),
         .SCALE(status[11:10])
 );
@@ -225,8 +225,10 @@ parameter CONF_STR = {
         "-;",
         "O12,Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
         "O79,Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%;",
+		  "OD,F18A Max Sprites,4,32;",
+        "OE,F18A Scanlines,Off,On;",
         "-;",
-        "O6,Border,No,Yes;",
+        //"O6,Border,No,Yes;",
         "OAB,Scale,Normal,V-Integer,Narrower HV-Integer,Wider HV-Integer;",
         "-;",
         "O3,Joysticks swap,No,Yes;",
@@ -239,7 +241,7 @@ parameter CONF_STR = {
 
 /////////////////  CLOCKS  ////////////////////////
 
-wire clk_sys;
+wire clk_sys,clk_100,clk_25;
 wire pll_locked;
 
 pll pll
@@ -250,14 +252,31 @@ pll pll
         .locked(pll_locked)
 );
 
+pll_vdp pll_vdp
+(
+        .refclk(CLK_50M),
+        .rst(0),
+        .outclk_0(clk_100),
+        .outclk_1(clk_25),
+        .locked()
+);
+
+
+reg ce_pix = 0;
+
+//always @(posedge clk_100) begin
+//        reg [2:0] div;
+//
+//        div    <= div+1'd1;
+//        ce_pix <= !div[1:0];
+//end
+
+
 reg ce_10m7 = 0;
-reg ce_5m3 = 0;
 always @(posedge clk_sys) begin
         reg [2:0] div;
-
         div <= div+1'd1;
         ce_10m7 <= !div[1:0];
-        ce_5m3  <= !div[2:0];
 end
 
 /////////////////  HPS  ///////////////////////////
@@ -466,19 +485,19 @@ wire  [7:0] upper_ram_do;
   end
 
 
-wire [13:0] vram_a;
-wire        vram_we;
-wire  [7:0] vram_di;
-wire  [7:0] vram_do;
-
-spramv #(14) vram
-(
-        .clock(clk_sys),
-        .address(vram_a),
-        .wren(vram_we),
-        .data(vram_do),
-        .q(vram_di)
-);
+//wire [13:0] vram_a;
+//wire        vram_we;
+//wire  [7:0] vram_di;
+//wire  [7:0] vram_do;
+//
+//spramv #(14) vram
+//(
+//        .clock(clk_sys),
+//        .address(vram_a),
+//        .wren(vram_we),
+//        .data(vram_do),
+//        .q(vram_di)
+//);
 
 
 wire [19:0] cart_a;
@@ -517,7 +536,7 @@ assign AUDIO_R = {1'b0,audio,1'd0};
 assign AUDIO_S = 0;
 assign AUDIO_MIX = 0;
 
-assign CLK_VIDEO = clk_sys;
+//assign CLK_VIDEO = clk_sys;
 
 wire [1:0] ctrl_p1;
 wire [1:0] ctrl_p2;
@@ -559,9 +578,14 @@ cv_console
   console
     (
         .clk_i(clk_sys),
-        .clk_en_10m7_i(ce_10m7),
+		  .clk_25_i  (clk_25),
+        .clk_100_i (clk_100),
+		  .clk_en_10m7_i(ce_10m7),
         .reset_n_i(~reset),
-        .por_n_o(),
+		  .sprite_max_i(~status[13]),
+        .scan_lines_i(status[14]),
+        
+		  .por_n_o(),
         .mode(~mode),
         .ctrl_p1_i(ctrl_p1),
         .ctrl_p2_i(ctrl_p2),
@@ -608,11 +632,11 @@ cv_console
         .ramb_dout(ramb_dout),
         .ramb_wr_ack(ramb_wr_ack),
         .ramb_rd_ack(ramb_rd_ack),
-
-        .vram_a_o(vram_a),
-        .vram_we_o(vram_we),
-        .vram_d_o(vram_do),
-        .vram_d_i(vram_di),
+//
+//        .vram_a_o(vram_a),
+//        .vram_we_o(vram_we),
+//        .vram_d_o(vram_do),
+//        .vram_d_i(vram_di),
 
         .cart_pages_i(cart_pages),
         .cart_a_o(cart_a),
@@ -631,6 +655,8 @@ cv_console
         .vsync_n_o(vsync),
         .hblank_o(hblank),
         .vblank_o(vblank),
+		  .ce_pix_o (ce_pix),
+		  .blank_n_o (),
 
         .audio_o(audio),
         .disk_present(disk_present),
@@ -645,6 +671,8 @@ cv_console
         .disk_din(disk_din),
         .ps2_key     (ps2_key)
 );
+
+assign CLK_VIDEO= clk_100;
 
 
   genvar                tla_i;
@@ -697,16 +725,14 @@ always @(posedge CLK_VIDEO) begin
         if(~hs_o & ~hsync) vs_o <= ~vsync;
 end
 
-video_mixer #(.LINE_LENGTH(290), .GAMMA(1)) video_mixer
+video_mixer #(.LINE_LENGTH(795), .GAMMA(1)) video_mixer
 (
         .*,
 
-        .ce_pix(ce_5m3),
+        .ce_pix(clk_25),
         .freeze_sync(),
-
-        .scandoubler(scale || forced_scandoubler),
-        .hq2x(scale==1),
-
+        .scandoubler(1'b0),
+        .hq2x(),
         .VGA_DE(vga_de),
         .R(R),
         .G(G),
@@ -718,6 +744,11 @@ video_mixer #(.LINE_LENGTH(290), .GAMMA(1)) video_mixer
         .HBlank(hblank),
         .VBlank(vblank)
 );
+
+
+
+
+
 
 //////////////// Keypad emulation (by Alan Steremberg) ///////
 
