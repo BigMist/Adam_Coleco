@@ -130,16 +130,11 @@ module cv_console
    input                        ramb_wr_ack,
    input                        ramb_rd_ack,
 
-   // Video RAM Interface ----------------------------------------------------
-//   output [13:0]                vram_a_o,
-//   output                       vram_we_o,
-//   output [7:0]                 vram_d_o,
-//   input [7:0]                  vram_d_i,
    // Cartridge ROM Interface ------------------------------------------------
    output [19:0]                cart_a_o,
    input [7:0]                  cart_d_i,
-        output                       cart_rd,
-        input [5:0]                  cart_pages_i,
+   output                       cart_rd,
+   input [5:0]                  cart_pages_i,
    // extended ROM Interface ------------------------------------------------
    output [19:0]                ext_rom_a_o,
    input [7:0]                  ext_rom_d_i,
@@ -167,6 +162,7 @@ module cv_console
    input [TOT_DISKS-1:0]        disk_sector_loaded, // set high when sector ready
    output logic [8:0]           disk_addr, // Byte to read or write from sector
    output logic [TOT_DISKS-1:0] disk_wr, // Write data into sector (read when low)
+	input logic [TOT_DISKS-1:0]  disk_flushed, // sector access done; so flush (hint)
    output logic [TOT_DISKS-1:0] disk_flush, // sector access done; so flush (hint)
    input logic [TOT_DISKS-1:0]  disk_error, // out of bounds (?)
    input logic [7:0]            disk_data[TOT_DISKS],
@@ -312,7 +308,7 @@ module cv_console
      .wait_n      (wait_n_s),
      .int_n       (int_n_s),
      .nmi_n       (nmi_n_s),
-     .busrq_n     ((USE_REQ == 1) ? adamnet_req_n : vdd_s),
+     .busrq_n     (vdd_s),
      .m1_n        (m1_n_s),
      .mreq_n      (mreq_n_s),
      .iorq_n      (iorq_n_s),
@@ -320,7 +316,7 @@ module cv_console
      .wr_n        (wr_n_s),
      .rfsh_n      (rfsh_n_s),
      .halt_n      (),
-     .busak_n     (adamnet_ack_n),
+     .busak_n     (),
      .A           (a_s),
      .di          (d_to_cpu_s),
      .dout        (d_from_cpu_s)
@@ -336,7 +332,7 @@ module cv_console
                            .wait_n(wait_n_s),
                            .int_n(int_n_s),
                            .nmi_n(nmi_n_s),
-                           .busrq_n(vdd_s),
+                           .busrq_n((USE_REQ == 1) ? adamnet_req_n : vdd_s),
                            .m1_n(m1_n_s),
                            .mreq_n(mreq_n_s),
                            .iorq_n(iorq_n_s),
@@ -344,7 +340,7 @@ module cv_console
                            .wr_n(wr_n_s),
                            .rfsh_n(rfsh_n_s),
                            .halt_n(),
-                           .busak_n(),
+                           .busak_n(adamnet_ack_n),
                            .a(a_s),
                            .di(d_to_cpu_s),
                            .dout(d_from_cpu_s)
@@ -463,7 +459,7 @@ module cv_console
 
  sn76489_audio #(.FAST_IO_G(1'b0),.MIN_PERIOD_CNT_G(17)) psg_a(
                                           .clk_i(clk_i),
-                                          .en_clk_psg_i(clk_en_3m58_p_s),
+                                          .en_clk_psg_i(clk_en_3m58_n_s),
                                           .ce_n_i(psg_we_n_s),
                                           .wr_n_i(psg_we_n_s),
                                           .ready_o(psg_ready_s),
@@ -520,7 +516,7 @@ module cv_console
                                                                  .mode(mode),
                          .a_i(a_s),
                          .d_i(d_from_cpu_s),
-                                                                 .cart_pages_i(cart_pages_i),
+                         .cart_pages_i(cart_pages_i),
                          .cart_page_o(cart_page_s),
                          .iorq_n_i(iorq_n_s),
                          .rd_n_i(rd_n_s),
@@ -535,11 +531,11 @@ module cv_console
                          .upper_ram_ce_n_o(upper_ram_ce_n_s),
                          .expansion_ram_ce_n_o(expansion_ram_ce_n_s),
                          .expansion_rom_ce_n_o(expansion_rom_ce_n_s),
-                                                                 .cartridge_rom_ce_n_o(cartridge_rom_ce_n_s),
+                         .cartridge_rom_ce_n_o(cartridge_rom_ce_n_s),
                          .vdp_r_n_o(vdp_r_n_s),
                          .vdp_w_n_o(vdp_w_n_s),
                          .psg_we_n_o(psg_we_n_s),
-                                                                 .ay_addr_we_n_o(ay_addr_we_n_s),
+                         .ay_addr_we_n_o(ay_addr_we_n_s),
                          .ay_data_we_n_o(ay_data_we_n_s),
                          .ay_data_rd_n_o(ay_data_rd_n_s),
                          .adam_reset_pcb_n_o(adam_reset_pcb_n_s),
@@ -606,6 +602,7 @@ module cv_console
      .disk_addr, // Byte to read or write from sector
      .disk_wr, // Write data into sector (read when low)
      .disk_flush, // sector access done, so flush (hint)
+     .disk_flushed, // sector access done, so flush (hint)
      .disk_error, // out of bounds (?)
      .disk_data,
      .disk_din,
@@ -636,7 +633,7 @@ module cv_console
   assign cpu_ram_rd_n_o = rd_n_s;
   assign cpu_lowerexpansion_ram_rd_n_o = rd_n_s;
   assign cpu_upper_ram_rd_n_o = rd_n_s;
-  assign cart_rd = ~cartridge_rom_ce_n_s;
+  assign cart_rd = ~cartridge_rom_ce_n_s || ~expansion_rom_ce_n_s;
 
   //---------------------------------------------------------------------------
   // Bus multiplexer
@@ -685,7 +682,8 @@ module cv_console
     if (~ram_ce_n_s)            d_ram_v  = cpu_ram_d_i;
     if (~lowerexpansion_ram_ce_n_s)            d_lowerexpansion_ram_v  = cpu_lowerexpansion_ram_d_i;
     if (~upper_ram_ce_n_s)      d_upper_ram_v = adamnet_sel ? adamnet_dout : cpu_upper_ram_d_i;
-    if (~expansion_rom_ce_n_s)  d_expansion_rom_v = ext_rom_d_i;
+    //if (~expansion_rom_ce_n_s)  d_expansion_rom_v = ext_rom_d_i;
+	 if (~expansion_rom_ce_n_s)  d_expansion_rom_v = cart_d_i;
     if (~cartridge_rom_ce_n_s)  d_cartridge_rom_v = cart_d_i;
     if (~vdp_r_n_s)             d_vdp_v  = d_from_vdp_s;
     if (~ctrl_r_n_s)            d_ctrl_v = d_to_ctrl_s;

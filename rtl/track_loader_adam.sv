@@ -25,16 +25,18 @@ module track_loader_adam
    input [8:0]         disk_addr, // Byte to read or write from sector
    input               disk_wr, // Write data into sector (read when low)
    input               disk_flush, // sector access done, so flush (hint)
+   output              disk_flushed, // Flush completed
    output logic        disk_error, // out of bounds (?)
    input [7:0]         disk_din,
    output logic [7:0]  disk_data
    );
 
-  enum bit [1:0] {
+  enum bit [2:0] {
                   IDLE,
                   READ,
                   WRITE,
-                  W4IDLE
+                  W4IDLE_READ,
+                  W4IDLE_WRITE
                   } floppy_state;
 
   // when we write to the disk, we need to mark it dirty
@@ -45,6 +47,7 @@ module track_loader_adam
   logic                         old_ack;
 
   always_ff @(posedge clk) begin
+    disk_flushed <= '0;
 
     if (disk_wr && disk_present) floppy_track_dirty <= '1;
 
@@ -94,7 +97,7 @@ module track_loader_adam
         if (&sd_buff_addr) begin
           sd_rd              <= 0;
           lba_fdd            <= lba_fdd + 1'd1;
-          floppy_state       <= W4IDLE;
+          floppy_state       <= W4IDLE_READ;
           disk_sector_loaded <= '1;
         end
         /*
@@ -115,7 +118,7 @@ module track_loader_adam
           floppy_track_dirty <= '0;
           sd_wr              <= 0;
           lba_fdd            <= lba_fdd + 1'd1;
-          floppy_state       <= W4IDLE;
+          floppy_state       <= W4IDLE_WRITE;
         end
         /*
         if (~old_ack & sd_ack) begin
@@ -126,8 +129,15 @@ module track_loader_adam
         end
          */
       end
-      W4IDLE: begin
+      W4IDLE_READ: begin
         if (~disk_load && ~disk_flush) begin
+          disk_flushed <= '1;
+          floppy_state <= IDLE;
+        end
+      end
+      W4IDLE_WRITE: begin
+        if (~disk_flush) begin
+          disk_flushed <= '1;
           floppy_state <= IDLE;
         end
       end
@@ -143,7 +153,7 @@ module track_loader_adam
     end
   end
 
-`ifdef VERILATOR
+//`ifdef VERILATOR
 bram #(8,9) floppy_dpram_onetrack
 (
         .clock_a(clk),
@@ -158,7 +168,7 @@ bram #(8,9) floppy_dpram_onetrack
         .data_b(disk_din),
         .q_b(disk_data)
 );
-
+/*
 `else
 
 dpram #(9,8) floppy_dpram
@@ -177,5 +187,5 @@ dpram #(9,8) floppy_dpram
 
 );
 `endif
-
+*/
 endmodule

@@ -107,6 +107,7 @@ module cv_adamnet
    output logic [8:0]           disk_addr, // Byte to read or write from sector
    output logic [TOT_DISKS-1:0] disk_wr, // Write data into sector (read when low)
    output logic [TOT_DISKS-1:0] disk_flush, // sector access done, so flush (hint)
+   input logic [TOT_DISKS-1:0]  disk_flushed, // sector access done, so flush (hint)
    input logic [TOT_DISKS-1:0]  disk_error, // out of bounds (?)
    input logic [7:0]            disk_data[TOT_DISKS],
    output logic [7:0]           disk_din,
@@ -543,8 +544,8 @@ module cv_adamnet
                         $display("SetDCB A ff56 Value %4h%4h, tape_present %h",
                                  (disk_present[NUM_DISKS+2] ? 4'h0 : 4'h3),
                                  (disk_present[NUM_DISKS+3] ? 4'h0 : 4'h3), disk_present);
-                        dcb_table[dcb_dev].dcb_node_type[3:0] <= disk_present[NUM_DISKS+2] ? 4'h0 : 4'h3;
-                        dcb_table[dcb_dev].dcb_node_type[7:4] <= disk_present[NUM_DISKS+3] ? 4'h0 : 4'h3;
+                        //dcb_table[dcb_dev].dcb_node_type[3:0] <= disk_present[NUM_DISKS+2] ? 4'h0 : 4'h3;
+                        //dcb_table[dcb_dev].dcb_node_type[7:4] <= disk_present[NUM_DISKS+3] ? 4'h0 : 4'h3;
                       end
                       case (z80_data_wr)
                         CMD_RESET: begin
@@ -733,7 +734,7 @@ module cv_adamnet
                {
                 DISK_IDLE,
                 DISK_READ[4],
-                DISK_WRITE[2],
+                DISK_WRITE[4],
                 TAPE_READ[4],
                 TAPE_WRITE[1]
                 } disk_state_t;
@@ -766,6 +767,7 @@ module cv_adamnet
   logic        osd;
   logic        watch_key;
   logic [22:0] key_rep_timer;
+  logic        disk_active;
 
   initial begin
     disk_state = DISK_IDLE;
@@ -774,10 +776,8 @@ module cv_adamnet
   end
 
   assign watch_key = (kbd_state == KBD_KEY) && (disk_state == DISK_IDLE);
-  
-  assign input_strobe = old_keystb ^ ps2_key[10];
-  reg old_keystb = 0;
-  always @(posedge clk_i) old_keystb <= ps2_key[10];
+
+  assign disk_sector = disk_active ? {disk_sec[31:3], InterleaveTable(disk_sec[2:0])} : disk_sec;
 
   always_ff @(posedge clk_i) begin
     ramb_addr        <= watch_key && input_strobe & ~clear_strobe ? kbd_buffer : int_ramb_addr[0];
@@ -804,7 +804,9 @@ module cv_adamnet
 
     case (disk_state)
       DISK_IDLE: begin
+        disk_active <= '0;
         if (disk_req) begin
+          disk_active <= '1;
           ram_buffer  <= buffer;
           disk_len    <= len;
           dcb_counter <= len;
@@ -825,7 +827,7 @@ module cv_adamnet
       DISK_READ0: begin
         ramb_addr   <= ram_buffer;
         ramb_rd     <= disk_rd;
-        disk_sector <= {disk_sec[31:3], InterleaveTable(disk_sec[2:0])};
+        //disk_sector <= {disk_sec[31:3], InterleaveTable(disk_sec[2:0])};
         disk_load[disk_dev]   <= '1;
         adamnet_req_n <= '0;
         if (disk_sector_loaded[disk_dev]) begin
@@ -874,21 +876,24 @@ module cv_adamnet
         if (~disk_sector_loaded[disk_dev]) disk_state <= DISK_READ0;
       end
       DISK_WRITE0: begin
-        $display("write0 %0d", ramb_addr);
+        $display("write0 %0h, %0h", ramb_addr, dcb_counter);
         adamnet_req_n <= '0;
         ramb_addr     <= ramb_addr + 1'b1;
         ramb_rd       <= '1;
         disk_state    <= DISK_WRITE1;
       end
       DISK_WRITE1: begin
-        $display("write0 %0d", ramb_addr);
+        ramb_addr    <= ramb_addr;
+        int_ramb_addr[0]    <= int_ramb_addr[0];
+        $display("write0 %0h, %0h", ramb_addr, dcb_counter);
         // Write up to 512 bytes (might be less)
         disk_addr         <= data_counter;
         disk_din          <= ramb_din;
-        disk_wr[disk_dev] <= '1;
         if (data_counter < dcb_counter && data_counter < 16'h200) begin
           // We are within the sector
+          disk_wr[disk_dev] <= '1;
           ramb_addr    <= ramb_addr + 1'b1;
+          int_ramb_addr[0]    <= int_ramb_addr[0] + 1'b1;
           ramb_rd      <= '1;
           data_counter <= data_counter + 1'b1;
           ram_buffer   <= ram_buffer + 1'b1;
@@ -896,10 +901,7 @@ module cv_adamnet
           // We are leaving the sector, but we have more data to read.
           // Flush the current sector
           disk_flush[disk_dev]   <= '1;
-          data_counter <= '0;
-          disk_sec     <= disk_sec + 1'b1; // Advance for next sector
-          dcb_counter  <= dcb_counter - 16'h200;
-          disk_state   <= DISK_WRITE1;
+          disk_state   <= DISK_WRITE2;
         end else begin
           // Done reading
           disk_flush[disk_dev] <= '1;
@@ -908,8 +910,25 @@ module cv_adamnet
           adamnet_req_n <= '1;
         end // else: !if(data_counter < dcb_counter)
       end // case: DISK_READ1
+      DISK_WRITE2: begin
+        ramb_addr    <= ramb_addr;
+        int_ramb_addr[0]    <= int_ramb_addr[0];
+        if (disk_flushed) begin
+          ramb_addr    <= ramb_addr - 1'b1;
+          data_counter <= '0;
+          disk_sec     <= disk_sec + 1'b1; // Advance for next sector
+          dcb_counter  <= dcb_counter - 16'h200;
+          disk_state   <= DISK_WRITE3;
+        end
+      end
+      DISK_WRITE3: begin
+        $display("write0 %0h, %0h", ramb_addr, dcb_counter);
+        ramb_addr     <= ramb_addr + 1'b1;
+        ramb_rd       <= '1;
+        disk_state    <= DISK_WRITE1;
+      end
       TAPE_READ0: begin
-        disk_sector <= disk_sec[31:0];
+        //disk_sector <= disk_sec[31:0];
         disk_load[disk_dev]   <= '1;
         adamnet_req_n <= '0;
         if (disk_sector_loaded[disk_dev]) begin
@@ -976,17 +995,20 @@ module cv_adamnet
       else begin
         press_btn    <= ps2_key[9];
         code         <= ps2_key[7:0];
-		end
-//        input_strobe <= '1;
-//        key_rep_timer <= 'd7000000;
-//    end else begin
-//        key_rep_timer <= key_rep_timer-1;
-//        if (key_rep_timer==0)
-//        begin
-//           key_rep_timer <= 933333;
-//        end
-//    end
+        input_strobe <= '1;
+        key_rep_timer <= 'd7000000;
+      end
+    end else if (clear_strobe) begin
+        input_strobe <= '0;
+    end else begin
+        key_rep_timer <= key_rep_timer-1;
+        if (key_rep_timer==0)
+        begin
+           key_rep_timer <= 933333;
+           input_strobe<= ps2_key[10];
+        end
     end
+
     clear_strobe <= '0;
 
     case (kbd_state)
