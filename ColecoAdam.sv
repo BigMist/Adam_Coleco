@@ -424,7 +424,7 @@ wire  [7:0] bios_d;
 
 
 
-spram #(13,8,"../rtl/bios.mif") rom0
+spramv #(13,8,"../rtl/bios.hex") rom0
 (
         .clock(clk_sys),
         .address(bios_a),
